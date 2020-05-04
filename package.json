@@ -10,16 +10,39 @@
 		"Other"
 	],
 	"activationEvents": [
-        "onCommand:env-ui.helloWorld"
+				"onCommand:env-ui.helloWorld",
+				"workspaceContains:**/.env*"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
 		"commands": [
 			{
 				"command": "env-ui.helloWorld",
-                "title": "Hello World"
+				"title": "Hello World"
+			},
+			{
+				"when": "",
+				"command": "env-ui.showView",
+				"title": "Show View",
+				"category": "Env UI"
+			},
+			{
+				"when": "",
+				"command": "env-ui.showViewToSide",
+				"title": "Show View to the side",
+				"category": "Env UI"
 			}
-		]
+		],
+		"menus": {
+      "editor/title": [
+        {
+          "when": "resourceScheme == .env*",
+          "command": "env-ui.showView",
+          "alt": "env-ui.showViewToSide",
+          "group": "navigation"
+        }
+      ]
+    }
 	},
 	"scripts": {
 		"vscode:prepublish": "yarn run compile",

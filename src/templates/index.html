@@ -1,0 +1,59 @@
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Environment UI</title>
+  </head>
+  <body>
+    <div
+      class="setting-item-contents"
+      data-key="powermode.backgroundMode"
+      data-id="searchResultModel_powermode_backgroundMode"
+    >
+      <div class="setting-item-title">
+        <div class="setting-item-cat-label-container">
+          <span class="setting-item-category" title="powermode.backgroundMode"
+            >Powermode: </span
+          ><span class="setting-item-label" title="powermode.backgroundMode"
+            >Background Mode</span
+          >
+        </div>
+        <span class="setting-item-overrides" style="display: none;"></span
+        ><span class="setting-item-ignored" style="display: none;"
+          >(<span class="codicon codicon-sync-ignored"></span> Sync:
+          Ignored)</span
+        >
+      </div>
+      <div
+        class="setting-item-description"
+        id="powermode_background_mode_setting_description"
+      >
+        Affects the css properties used to display the gif. `mask` uses the gifs
+        as a mask to let the background come through (similar to atom power
+        mode) and `image` will display the actual gif.
+      </div>
+      <div class="setting-item-enumDescription"></div>
+      <div class="setting-item-modified-indicator" title="Modified"></div>
+      <div class="setting-item-value">
+        <div class="setting-item-control select-container">
+          <select
+            class="monaco-select-box monaco-select-box-dropdown-padding setting-control-focus-target"
+            role="combobox"
+            id="powermode_background_mode_setting_item"
+            aria-label="Powermode Background Mode. "
+            aria-describedby="powermode_background_mode_setting_description settings_aria_more_actions_shortcut_label"
+            title="mask"
+            style="
+              background-color: rgb(60, 60, 60);
+              color: rgb(240, 240, 240);
+              border-color: rgb(60, 60, 60);
+            "
+            ><option value="mask">mask</option
+            ><option value="image">image</option></select
+          >
+        </div>
+      </div>
+      <div class="setting-item-deprecation-message"></div>
+    </div>
+  </body>
+</html>

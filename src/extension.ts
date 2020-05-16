@@ -4,7 +4,33 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import parse from "./parse";
+import * as _ from "lodash";
 
+type PostMessage = {
+  command: string;
+  payload: {
+    filePath: string;
+    key: string;
+    // TODO: questionable whether we need to pass this?
+    value: string;
+    inputValue: string | boolean;
+  };
+};
+
+let GLOBAL_EXTENSION_CONTEXT: vscode.ExtensionContext;
+
+// Loads a file from the src folder of the extension
+function getExtensionFileUri(repoRelativePath: string): vscode.Uri {
+  return vscode.Uri.file(
+    path.join(GLOBAL_EXTENSION_CONTEXT.extensionPath, "src", repoRelativePath)
+  );
+}
+
+function readExtensionFile(repoRelativePath: string): string {
+  return fs.readFileSync(getExtensionFileUri(repoRelativePath).fsPath, "utf8");
+}
+
+// At the moment only finds files starting with .env in the workspace root dir.
 const findEnvFiles = () => {
   if (!vscode.workspace.rootPath) {
     console.log("No workspace.rootPath");
@@ -35,10 +61,50 @@ const getFileContents = (file: string) => {
   return fs.readFileSync(path.resolve(vscode.workspace.rootPath, file));
 };
 
+const updateVariableInFile = (
+  payload: PostMessage["payload"],
+  variableInfo: {
+    value: string;
+    line: number;
+  }
+) => {
+  if (!vscode.workspace.rootPath) {
+    console.log("No workspace.rootPath");
+    return;
+  }
+
+  const { filePath, key, inputValue } = payload;
+  const resolvedFilePath = path.resolve(vscode.workspace.rootPath, filePath);
+
+  const fileContents = fs.readFileSync(resolvedFilePath);
+
+  const replaceLine = (fileContents: string | Buffer, line, text) => {
+    const lines = fileContents.toString().split("\n");
+
+    lines[line] = text;
+
+    return lines.join("\n");
+  };
+
+  fs.writeFileSync(
+    resolvedFilePath,
+    replaceLine(fileContents, variableInfo.line, `${key} = ${inputValue}`),
+    {
+      encoding: "utf8",
+    }
+  );
+};
+
 // this method is called when your extension is activated
 // this method is called only once for the activation.
 // your extension is activated the very first time an activationEvent is triggered
 export function activate(context: vscode.ExtensionContext) {
+  GLOBAL_EXTENSION_CONTEXT = context;
+
+  // Need to do the weird VS Code URI loading thing
+  const indexHTML = readExtensionFile("./templates/index.html");
+  const templatePage = _.template(indexHTML);
+
   // Use the console to output diagnostic information (console.log) and errors (console.error)
   // This line of code will only be executed once when your extension is activated
   console.log('Congratulations, your extension "env-ui" is now active!');
@@ -49,14 +115,14 @@ export function activate(context: vscode.ExtensionContext) {
   // The command has been defined in the package.json file
   // Now provide the implementation of the command with registerCommand
   // The commandId parameter must match the command field in package.json
-  let disposable = vscode.commands.registerCommand("env-ui.helloWorld", () => {
-    // The code you place here will be executed every time your command is executed
+  context.subscriptions.push(
+    vscode.commands.registerCommand("env-ui.helloWorld", () => {
+      // The code you place here will be executed every time your command is executed
 
-    // Display a message box to the user
-    vscode.window.showInformationMessage("Hello World from env-ui!");
-  });
-
-  context.subscriptions.push(disposable);
+      // Display a message box to the user
+      vscode.window.showInformationMessage("Hello World from env-ui!");
+    })
+  );
 
   let envViewPanel: vscode.WebviewPanel;
 
@@ -67,9 +133,11 @@ export function activate(context: vscode.ExtensionContext) {
         : undefined;
       const files = findEnvFiles();
 
+      const varsPerFile = {};
+
       const perFileHTML = files
-        ?.map((file) => {
-          const contents = getFileContents(file);
+        ?.map((filePath) => {
+          const contents = getFileContents(filePath);
 
           if (!contents) {
             return "";
@@ -77,23 +145,43 @@ export function activate(context: vscode.ExtensionContext) {
 
           // Can I use a more generic file parser? I need an AST to understand comments etc?
           // I mean custom parser would do, because AST migth be overengineered.
+          // Do we use a custom INI file parser?
           const vars = parse(contents);
+
+          varsPerFile[filePath] = vars;
 
           // TODO: move HTML files into separate folder. How can I template these in a decent way?
           return `
-            <h3>${file}</h3>
+            <h3>${filePath}</h3>
             ${
               Object.entries(vars).length === 0
                 ? "<i>File is empty</i>"
                 : `
                   <ul>
                     ${Object.entries(vars)
-                      ?.map(([key, value]) => {
+                      ?.map(([key, { value, type }]) => {
+                        const inputType =
+                          {
+                            boolean: "checkbox",
+                            number: "number",
+                            string: "text",
+                          }[type] || "text";
+
+                        const input =
+                          inputType === "checkbox"
+                            ? `<input type="${inputType}" ${
+                                Boolean(value) ? 'checked="checked"' : ""
+                              } data-file-path="${filePath}" data-key="${key}" data-value="${value}" />`
+                            : inputType === "number"
+                            ? `<input type="${inputType}" value="${value}" data-file-path="${filePath}" data-key="${key}" data-value="${value}" />`
+                            : `<input type="${inputType}" value="${value}" data-file-path="${filePath}" data-key="${key}" data-value="${value}" />`;
+
                         return `
-                          <li>
+                          <li class="input-wrapper">
                             <label>
-                              <input type="checkbox" data-key="${key}" data-value="${value}" />
-                              ${key}: ${value}
+                              ${key}
+                              ${input}
+                              <small><em>(initial: ${value})</em></small>
                             </label>
                           </li>
                         `;
@@ -116,39 +204,9 @@ export function activate(context: vscode.ExtensionContext) {
       );
 
       // Don't really want to do that, necessarily, can we message the view with new data?
-      envViewPanel.webview.html = `
-			<!DOCTYPE html>
-			<html lang="en">
-			<head>
-					<meta charset="UTF-8">
-					<meta name="viewport" content="width=device-width, initial-scale=1.0">
-					<title>Environment file UI</title>
-			</head>
-			<body>
-					<h1>You can see your environment here!</h1>
-					<h2>Files in this workspace</h2>
-					${perFileHTML}
-			</body>
-			<script>
-				const vscode = acquireVsCodeApi();
-				const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-
-				checkboxes.forEach(input => {
-					input.addEventListener('change', event => {
-						// TODO: Is it only a single update event?
-						vscode.postMessage({
-							command: 'updateVariable',
-							payload: {
-								key: event.target.dataset.key,
-								value: event.target.dataset.value,
-								checkboxValue: event.target.checked
-							}
-						})
-					});
-				});
-			</script>
-			</html>
-		`;
+      envViewPanel.webview.html = templatePage({
+        body: perFileHTML,
+      });
 
       envViewPanel.onDidDispose(
         () => {
@@ -158,12 +216,42 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions
       );
 
-      envViewPanel.webview.onDidReceiveMessage((message) => {
+      envViewPanel.webview.onDidReceiveMessage((message: PostMessage) => {
         switch (message.command) {
           case "updateVariable":
-            console.log(
-              `Update variable ${message.payload.key}: ${message.payload.value} (${message.payload.checkboxValue})`
-            );
+            const file = varsPerFile[message.payload.filePath];
+
+            if (!file) {
+              console.error(`Did not find file: ${message.payload.filePath}`);
+            }
+
+            const variable = file[message.payload.key];
+
+            if (!variable) {
+              console.error(`Did not find var: ${message.payload.key}`);
+            }
+
+            console.log(`Update variable`);
+            console.table({
+              filePath: {
+                value: message.payload.filePath,
+                type: typeof message.payload.filePath,
+              },
+              key: {
+                value: message.payload.key,
+                type: typeof message.payload.key,
+              },
+              value: {
+                value: message.payload.value,
+                type: typeof message.payload.value,
+              },
+              inputValue: {
+                value: message.payload.inputValue,
+                type: typeof message.payload.inputValue,
+              },
+            });
+
+            updateVariableInFile(message.payload, variable);
             // TODO: Update the file... HOW? How do you update the files? Should I read the file and keep a record of where the values are in it? D:! UMMM!!!
             // What if file changes when this is open? Can I listen for file changes?
             return;

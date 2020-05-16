@@ -3,7 +3,14 @@ type DotenvParseOptions = {
 };
 
 // keys and values from src
-type DotenvParseOutput = { [key: string]: string };
+type DotenvParseOutput = {
+  [key: string]: {
+    value: string;
+    type: "boolean" | "number" | "string";
+    // Zero based index of where in the file the variable is defined
+    line: number;
+  };
+};
 
 type DotenvConfigOptions = {
   path?: string; // path to .env file
@@ -20,6 +27,8 @@ const NEWLINE = "\n";
 const RE_INI_KEY_VAL = /^\s*([\w.-]+)\s*=\s*(.*)?\s*$/;
 const RE_NEWLINES = /\\n/g;
 const NEWLINES_MATCH = /\n|\r|\r\n/;
+
+// https://www.npmjs.com/package/multi-ini???
 
 // Parses src into an Object
 // nicked directly from https://github.com/motdotla/dotenv/blob/master/lib/main.js
@@ -38,13 +47,17 @@ function parse(
       // matching "KEY' and 'VAL' in 'KEY=VAL'
       const keyValueArr = line.match(RE_INI_KEY_VAL);
       // matched?
-      if (keyValueArr != null) {
+      if (keyValueArr !== null) {
         const key = keyValueArr[1];
         // default undefined or missing values to empty string
         let val = keyValueArr[2] || "";
         const end = val.length - 1;
         const isDoubleQuoted = val[0] === '"' && val[end] === '"';
         const isSingleQuoted = val[0] === "'" && val[end] === "'";
+
+        const linePosStart = val ? line.indexOf(val) + 1 : undefined;
+        const linePosEnd =
+          val && linePosStart ? linePosStart + val.length : undefined;
 
         // if single or double quoted, remove quotes
         if (isSingleQuoted || isDoubleQuoted) {
@@ -59,10 +72,22 @@ function parse(
           val = val.trim();
         }
 
+        const isNumber = (val) => !isNaN(Number(val)) && isFinite(Number(val));
+
+        const type = ["true", "false"].includes(val.toLowerCase())
+          ? "boolean"
+          : isNumber(val)
+          ? "number"
+          : "string";
+
         // was this: `obj[key] = val`
         obj = {
           ...obj,
-          [key]: val,
+          [key]: {
+            value: val,
+            type,
+            line: idx,
+          },
         };
       } else if (debug) {
         console.log(

@@ -35,25 +35,34 @@ function readExtensionFile(repoRelativePath: string): string {
 }
 
 // At the moment only finds files starting with .env in the workspace root dir.
-const findEnvFiles = () => {
-  if (!vscode.workspace.rootPath) {
-    console.log("No workspace.rootPath");
-    return;
+const findEnvFiles: () => { [folderFsPath: string]: string[] } = () => {
+  const workspaceFolders = vscode.workspace.workspaceFolders || [];
+  const filesPerFolder = {};
+
+  for (const workspaceFolder of workspaceFolders) {
+    const { name, uri } = workspaceFolder;
+
+    console.log(`Workspace folder: ${name} @ ${uri}`);
+
+    // TODO: support vscode.workspace.workspaceFolders, rootPath is deprecated
+    // Which means menu to select which file to show, rather than just all, so show per file, or per folder
+    const files = fs.readdirSync(uri.fsPath).filter((file) => {
+      if (file.startsWith(".env")) {
+        return true;
+      }
+
+      return false;
+    });
+
+    console.log(`Found ${files.length} files!`);
+    console.log(files);
+
+    if (files.length) {
+      filesPerFolder[uri.fsPath] = files;
+    }
   }
 
-  const files = fs.readdirSync(vscode.workspace.rootPath).filter((file) => {
-    if (file.startsWith(".env")) {
-      console.log(`Found file: ${file}`);
-      return true;
-    }
-
-    return false;
-  });
-
-  console.log(`Found ${files.length} files!`);
-  console.log(files);
-
-  return files || [];
+  return filesPerFolder;
 };
 
 const getFileContents = (file: string) => {
@@ -156,65 +165,74 @@ export function activate(context: vscode.ExtensionContext) {
       const columnToShowIn = vscode.window.activeTextEditor
         ? vscode.window.activeTextEditor.viewColumn
         : undefined;
-      const files = findEnvFiles();
+      const filesPerFolder = findEnvFiles();
 
       const varsPerFile: { [filePath: string]: DotenvParseOutput } = {};
 
-      const perFileHTML = files
-        ?.map((filePath) => {
-          const contents = getFileContents(filePath);
+      const perFileHTML = Object.entries(filesPerFolder)
+        .map(([folderFsPath, envFiles]) => {
+          const htmlPerFile: string[] = [];
 
-          if (!contents) {
-            return "";
+          for (const envFilePath of envFiles) {
+            const contents = getFileContents(envFilePath);
+
+            if (!contents) {
+              return "";
+            }
+
+            // Can I use a more generic file parser? I need an AST to understand comments etc?
+            // I mean custom parser would do, because AST migth be overengineered.
+            // Do we use a custom INI file parser?
+            const vars = parse(contents);
+
+            varsPerFile[envFilePath] = vars;
+
+            htmlPerFile.push(`
+              <h3>${envFilePath}</h3>
+              ${
+                Object.entries(vars).length === 0
+                  ? "<i>File is empty</i>"
+                  : `
+                    <ul>
+                      ${Object.entries(vars)
+                        ?.map(([key, { value, type }]) => {
+                          const inputType =
+                            {
+                              boolean: "checkbox",
+                              number: "number",
+                              string: "text",
+                            }[type] || "text";
+
+                          const input =
+                            inputType === "checkbox"
+                              ? `<input type="${inputType}" ${
+                                  Boolean(value) ? 'checked="checked"' : ""
+                                } data-file-path="${envFilePath}" data-key="${key}" data-value="${value}" />`
+                              : inputType === "number"
+                              ? `<input type="${inputType}" value="${value}" data-file-path="${envFilePath}" data-key="${key}" data-value="${value}" />`
+                              : `<input type="${inputType}" value="${value}" data-file-path="${envFilePath}" data-key="${key}" data-value="${value}" />`;
+
+                          return `
+                            <li class="input-wrapper">
+                              <label>
+                                ${key}
+                                ${input}
+                                <small><em>(initial: ${value})</em></small>
+                              </label>
+                            </li>
+                          `;
+                        })
+                        .join("")}
+                    </ul>	
+                  `
+              }
+            `);
           }
-
-          // Can I use a more generic file parser? I need an AST to understand comments etc?
-          // I mean custom parser would do, because AST migth be overengineered.
-          // Do we use a custom INI file parser?
-          const vars = parse(contents);
-
-          varsPerFile[filePath] = vars;
 
           // TODO: move HTML files into separate folder. How can I template these in a decent way?
           return `
-            <h3>${filePath}</h3>
-            ${
-              Object.entries(vars).length === 0
-                ? "<i>File is empty</i>"
-                : `
-                  <ul>
-                    ${Object.entries(vars)
-                      ?.map(([key, { value, type }]) => {
-                        const inputType =
-                          {
-                            boolean: "checkbox",
-                            number: "number",
-                            string: "text",
-                          }[type] || "text";
-
-                        const input =
-                          inputType === "checkbox"
-                            ? `<input type="${inputType}" ${
-                                Boolean(value) ? 'checked="checked"' : ""
-                              } data-file-path="${filePath}" data-key="${key}" data-value="${value}" />`
-                            : inputType === "number"
-                            ? `<input type="${inputType}" value="${value}" data-file-path="${filePath}" data-key="${key}" data-value="${value}" />`
-                            : `<input type="${inputType}" value="${value}" data-file-path="${filePath}" data-key="${key}" data-value="${value}" />`;
-
-                        return `
-                          <li class="input-wrapper">
-                            <label>
-                              ${key}
-                              ${input}
-                              <small><em>(initial: ${value})</em></small>
-                            </label>
-                          </li>
-                        `;
-                      })
-                      .join("")}
-                  </ul>	
-                `
-            }
+            <h2>${folderFsPath}</h2>
+            ${htmlPerFile.join("")}
           `;
         })
         .join("");

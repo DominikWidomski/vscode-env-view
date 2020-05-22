@@ -3,7 +3,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
-import parse from "./parse";
+import parse, { DotenvParseOutput, DotenvVariableInfo } from "./parse";
 import * as _ from "lodash";
 
 type PostMessage = {
@@ -17,10 +17,14 @@ type PostMessage = {
   };
 };
 
-let GLOBAL_EXTENSION_CONTEXT: vscode.ExtensionContext;
+let GLOBAL_EXTENSION_CONTEXT: vscode.ExtensionContext | undefined;
 
 // Loads a file from the src folder of the extension
 function getExtensionFileUri(repoRelativePath: string): vscode.Uri {
+  if (!GLOBAL_EXTENSION_CONTEXT) {
+    throw new Error("No extension context found.");
+  }
+
   return vscode.Uri.file(
     path.join(GLOBAL_EXTENSION_CONTEXT.extensionPath, "src", repoRelativePath)
   );
@@ -63,10 +67,7 @@ const getFileContents = (file: string) => {
 
 const updateVariableInFile = (
   payload: PostMessage["payload"],
-  variableInfo: {
-    value: string;
-    line: number;
-  }
+  variableInfo: DotenvVariableInfo
 ) => {
   if (!vscode.workspace.rootPath) {
     console.log("No workspace.rootPath");
@@ -86,9 +87,33 @@ const updateVariableInFile = (
     return lines.join("\n");
   };
 
+  const replaceLineAt = (
+    fileContents: string | Buffer,
+    lineIndex: number,
+    newText: any,
+    startPos: number,
+    endPos: number
+  ) => {
+    const lines = fileContents.toString().split("\n");
+
+    lines[lineIndex] =
+      lines[lineIndex].substr(0, startPos) +
+      newText +
+      lines[lineIndex].substr(endPos);
+
+    return lines.join("\n");
+  };
+
   fs.writeFileSync(
     resolvedFilePath,
-    replaceLine(fileContents, variableInfo.line, `${key} = ${inputValue}`),
+    // replaceLine(fileContents, variableInfo.line, `${key} = ${inputValue}`),
+    replaceLineAt(
+      fileContents,
+      variableInfo.line,
+      inputValue,
+      variableInfo.linePosition.start,
+      variableInfo.linePosition.end
+    ),
     {
       encoding: "utf8",
     }
@@ -133,7 +158,7 @@ export function activate(context: vscode.ExtensionContext) {
         : undefined;
       const files = findEnvFiles();
 
-      const varsPerFile = {};
+      const varsPerFile: { [filePath: string]: DotenvParseOutput } = {};
 
       const perFileHTML = files
         ?.map((filePath) => {
@@ -225,9 +250,9 @@ export function activate(context: vscode.ExtensionContext) {
               console.error(`Did not find file: ${message.payload.filePath}`);
             }
 
-            const variable = file[message.payload.key];
+            const variableInfo = file[message.payload.key];
 
-            if (!variable) {
+            if (!variableInfo) {
               console.error(`Did not find var: ${message.payload.key}`);
             }
 
@@ -251,9 +276,28 @@ export function activate(context: vscode.ExtensionContext) {
               },
             });
 
-            updateVariableInFile(message.payload, variable);
+            updateVariableInFile(message.payload, variableInfo);
             // TODO: Update the file... HOW? How do you update the files? Should I read the file and keep a record of where the values are in it? D:! UMMM!!!
             // What if file changes when this is open? Can I listen for file changes?
+
+            // Update in-memory information on where variables are defined in the file
+            // TODO: Should read the file again fully perhaps, because even implied types can change (type "true" in an input?)
+            const updateFileDefinitions = (payload: PostMessage["payload"]) => {
+              const file = varsPerFile[payload.filePath];
+
+              if (!file) {
+                console.error(`Did not find file: ${payload.filePath}`);
+              }
+
+              const variableInfo = file[message.payload.key];
+
+              variableInfo.linePosition.end =
+                variableInfo.linePosition.start +
+                payload.inputValue.toString().length;
+            };
+
+            updateFileDefinitions(message.payload);
+
             return;
 
           default:

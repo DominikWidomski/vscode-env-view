@@ -2,14 +2,17 @@ type DotenvParseOptions = {
   debug?: boolean;
 };
 
+export type DotenvVariableInfo = {
+  value: string;
+  type: "boolean" | "number" | "string";
+  // Zero based index of where in the file the variable is defined
+  line: number;
+  linePosition: { start: number; end: number };
+};
+
 // keys and values from src
-type DotenvParseOutput = {
-  [key: string]: {
-    value: string;
-    type: "boolean" | "number" | "string";
-    // Zero based index of where in the file the variable is defined
-    line: number;
-  };
+export type DotenvParseOutput = {
+  [key: string]: DotenvVariableInfo;
 };
 
 type DotenvConfigOptions = {
@@ -55,7 +58,7 @@ function parse(
         const isDoubleQuoted = val[0] === '"' && val[end] === '"';
         const isSingleQuoted = val[0] === "'" && val[end] === "'";
 
-        const linePosStart = val ? line.indexOf(val) + 1 : undefined;
+        const linePosStart = val ? line.indexOf(val) : undefined;
         const linePosEnd =
           val && linePosStart ? linePosStart + val.length : undefined;
 
@@ -87,6 +90,10 @@ function parse(
             value: val,
             type,
             line: idx,
+            linePosition: {
+              start: linePosStart,
+              end: linePosEnd,
+            },
           },
         };
       } else if (debug) {

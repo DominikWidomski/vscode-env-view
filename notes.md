@@ -1,7 +1,11 @@
 # TODOs
 
 - [x] updating the view when file is updated/created, doesn't update values
-- [ ] Checkbox rendering is weird? Why does exampleTEST say initial: false when it's checked???
+- [x] Checkbox rendering is broken - should have checked string value
+- [ ] View re-renders from a file change when we change value in the view.
+  - Not sure if this ok, and not sure what I want to do with the "initial: value" hint, what does that mean?
+- [ ] Number inputs are buggy. Why?
+  - Sometimes I can only increment the number using the native number type input UI once or twice and I have to unfocus the input before I can do that again.
 - [ ] `simonsiefke.svg-preview` - this extension has the top bar icon that I also want!
 
 ## General notes

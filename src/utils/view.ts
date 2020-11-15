@@ -20,7 +20,7 @@ const generateHTMLForVars = (vars: DotenvParseOutput, envFilePath: string) => {
               const input =
                 inputType === "checkbox"
                   ? `<input type="${inputType}" ${
-                      Boolean(value) ? 'checked="checked"' : ""
+                      value === "true" ? 'checked="checked"' : ""
                     } data-file-path="${envFilePath}" data-key="${key}" data-value="${value}" />`
                   : inputType === "number"
                   ? `<input type="${inputType}" value="${value}" data-file-path="${envFilePath}" data-key="${key}" data-value="${value}" />`

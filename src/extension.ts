@@ -5,6 +5,9 @@ import * as path from "path";
 import * as fs from "fs";
 import parse, { DotenvParseOutput, DotenvVariableInfo } from "./parse";
 import * as _ from "lodash";
+import { getFileContentsAbsolute } from "./utils/file";
+import { generateHTMLForView, generateHTMLForViewFromVars } from "./utils/view";
+import { EnvFilePaths } from "./types";
 
 type PostMessage = {
   command: string;
@@ -35,7 +38,7 @@ function readExtensionFile(repoRelativePath: string): string {
 }
 
 // At the moment only finds files starting with .env in the workspace root dir.
-const findEnvFiles: () => { [folderFsPath: string]: string[] } = () => {
+const findEnvFiles = (): EnvFilePaths => {
   const workspaceFolders = vscode.workspace.workspaceFolders || [];
   const filesPerFolder = {};
 
@@ -63,15 +66,6 @@ const findEnvFiles: () => { [folderFsPath: string]: string[] } = () => {
   }
 
   return filesPerFolder;
-};
-
-const getFileContents = (file: string) => {
-  if (!vscode.workspace.rootPath) {
-    console.log("No workspace.rootPath");
-    return;
-  }
-
-  return fs.readFileSync(path.resolve(vscode.workspace.rootPath, file));
 };
 
 const updateVariableInFile = (
@@ -158,84 +152,76 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("env-ui.showViewToSide", () => {
+      vscode.window.showInformationMessage("[showViewToSide]: TODO!");
+    })
+  );
+
   let envViewPanel: vscode.WebviewPanel;
+
+  const varsPerFile: { [filePath: string]: DotenvParseOutput } = {};
+
+  // TODO: Silly name to point out it's stupid.
+  // Just trying to see if re-evaluating the files from scratch works for now
+  // then refactor!
+  const reRenderAndAssignViewCompletely = () => {
+    const filesPerFolder = findEnvFiles();
+    const perFileHTML = generateHTMLForView(filesPerFolder);
+
+    envViewPanel.webview.html = templatePage({
+      body: perFileHTML,
+    });
+  };
+
+  for (const workspaceFolder of vscode.workspace.workspaceFolders || []) {
+    const { uri: workspaceUri } = workspaceFolder;
+
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(workspaceUri.fsPath, ".env*")
+    );
+
+    const handleFileChangeOrCreate = (uri) => {
+      console.log(`ENV FILE CHANGE DETECTED at: ${uri.fsPath}`);
+
+      const contents = getFileContentsAbsolute(uri.fsPath);
+
+      if (!contents) {
+        return;
+      }
+
+      const vars = parse(contents);
+
+      // Remove the root of the folder from the path so the key is relative
+      console.log(vars);
+      varsPerFile[
+        uri.fsPath.replace(workspaceUri.fsPath, "").replace(/^\/*/, "")
+      ] = vars;
+
+      reRenderAndAssignViewCompletely();
+    };
+
+    watcher.onDidCreate(handleFileChangeOrCreate);
+    watcher.onDidChange(handleFileChangeOrCreate);
+  }
 
   context.subscriptions.push(
     vscode.commands.registerCommand("env-ui.showView", () => {
       const columnToShowIn = vscode.window.activeTextEditor
         ? vscode.window.activeTextEditor.viewColumn
         : undefined;
+      // TODO: Maybe this can be memoised
       const filesPerFolder = findEnvFiles();
 
-      const varsPerFile: { [filePath: string]: DotenvParseOutput } = {};
+      // TODO: There's a watch API here. Shall I use it?
+      // https://code.visualstudio.com/api/references/vscode-api
 
-      const perFileHTML = Object.entries(filesPerFolder)
-        .map(([folderFsPath, envFiles]) => {
-          const htmlPerFile: string[] = [];
+      // TODO: This was previously updating the varsPerFile in this scope. Now it doesn't.
+      // Need to split out these functionalities
+      const perFileHTML = generateHTMLForView(filesPerFolder);
 
-          for (const envFilePath of envFiles) {
-            const contents = getFileContents(envFilePath);
-
-            if (!contents) {
-              return "";
-            }
-
-            // Can I use a more generic file parser? I need an AST to understand comments etc?
-            // I mean custom parser would do, because AST migth be overengineered.
-            // Do we use a custom INI file parser?
-            const vars = parse(contents);
-
-            varsPerFile[envFilePath] = vars;
-
-            htmlPerFile.push(`
-              <h3>${envFilePath}</h3>
-              ${
-                Object.entries(vars).length === 0
-                  ? "<i>File is empty</i>"
-                  : `
-                    <ul>
-                      ${Object.entries(vars)
-                        ?.map(([key, { value, type }]) => {
-                          const inputType =
-                            {
-                              boolean: "checkbox",
-                              number: "number",
-                              string: "text",
-                            }[type] || "text";
-
-                          const input =
-                            inputType === "checkbox"
-                              ? `<input type="${inputType}" ${
-                                  Boolean(value) ? 'checked="checked"' : ""
-                                } data-file-path="${envFilePath}" data-key="${key}" data-value="${value}" />`
-                              : inputType === "number"
-                              ? `<input type="${inputType}" value="${value}" data-file-path="${envFilePath}" data-key="${key}" data-value="${value}" />`
-                              : `<input type="${inputType}" value="${value}" data-file-path="${envFilePath}" data-key="${key}" data-value="${value}" />`;
-
-                          return `
-                            <li class="input-wrapper">
-                              <label>
-                                ${key}
-                                ${input}
-                                <small><em>(initial: ${value})</em></small>
-                              </label>
-                            </li>
-                          `;
-                        })
-                        .join("")}
-                    </ul>	
-                  `
-              }
-            `);
-          }
-
-          // TODO: move HTML files into separate folder. How can I template these in a decent way?
-          return `
-            <h2>${folderFsPath}</h2>
-            ${htmlPerFile.join("")}
-          `;
-        })
-        .join("");
+      console.log("Final vars per file for the view:");
+      console.log(varsPerFile);
 
       envViewPanel = vscode.window.createWebviewPanel(
         "env-ui-view",
